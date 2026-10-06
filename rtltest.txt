@@ -1,0 +1,432 @@
+// Code your testbench here
+// or browse Examples
+`timescale 1ns/1ps
+
+module apb4_addr_decoder #(
+    parameter int ADDR_WIDTH = 32,
+    parameter int NUM_SLAVES = 4,
+    parameter logic [ADDR_WIDTH-1:0] BASE_ADDR = '0,
+    parameter int unsigned SLAVE_WINDOW_BYTES = 4096
+) (
+    input  logic [ADDR_WIDTH-1:0]     PADDR,
+    input  logic                      master_select,
+    output logic [NUM_SLAVES-1:0]     PSEL
+);
+
+    integer i;
+    logic [ADDR_WIDTH-1:0] low_addr;
+    logic [ADDR_WIDTH-1:0] high_addr;
+
+    always_comb begin
+        PSEL = '0;
+
+        if (master_select) begin
+            for (i = 0; i < NUM_SLAVES; i = i + 1) begin
+                low_addr  = BASE_ADDR + (i * SLAVE_WINDOW_BYTES);
+                high_addr = BASE_ADDR + ((i + 1) * SLAVE_WINDOW_BYTES);
+                if ((PADDR >= low_addr) && (PADDR < high_addr)) begin
+                    PSEL[i] = 1'b1;
+                end
+            end
+        end
+    end
+
+endmodule
+`timescale 1ns/1ps
+
+module apb4_master #(
+    parameter int ADDR_WIDTH = 32,
+    parameter int DATA_WIDTH = 32,
+    parameter int STRB_WIDTH = DATA_WIDTH/8
+) (
+    input  logic                  PCLK,
+    input  logic                  PRESETn,
+
+    // Simple upstream request interface (project-specific, not part of APB4)
+    input  logic                  req_valid,
+    output logic                  req_ready,
+    input  logic [ADDR_WIDTH-1:0] req_addr,
+    input  logic                  req_write,
+    input  logic [DATA_WIDTH-1:0] req_wdata,
+    input  logic [STRB_WIDTH-1:0] req_strb,
+    input  logic [2:0]            req_prot,
+
+    output logic                  rsp_valid,
+    output logic [DATA_WIDTH-1:0] rsp_rdata,
+    output logic                  rsp_err,
+
+    // APB4 requester/master side
+    output logic [ADDR_WIDTH-1:0] PADDR,
+    output logic                  PENABLE,
+    output logic                  PWRITE,
+    output logic [DATA_WIDTH-1:0] PWDATA,
+    output logic [STRB_WIDTH-1:0] PSTRB,
+    output logic [2:0]            PPROT,
+    output logic                  master_select,
+
+    input  logic                  PREADY,
+    input  logic [DATA_WIDTH-1:0] PRDATA,
+    input  logic                  PSLVERR
+);
+
+    typedef enum logic [1:0] {
+        IDLE,
+        SETUP,
+        ACCESS
+    } apb_state_t;
+
+    apb_state_t state;
+
+    logic [ADDR_WIDTH-1:0] addr_q;
+    logic                  write_q;
+    logic [DATA_WIDTH-1:0] wdata_q;
+    logic [STRB_WIDTH-1:0] strb_q;
+    logic [2:0]            prot_q;
+
+    // A new request can be accepted in IDLE or on the same clock edge
+    // that the current APB access completes. This permits back-to-back
+    // APB transfers while still inserting the mandatory SETUP phase.
+    always_comb begin
+        req_ready = (state == IDLE) || ((state == ACCESS) && PREADY);
+    end
+
+    always_comb begin
+        PADDR         = addr_q;
+        PWRITE        = write_q;
+        PWDATA        = wdata_q;
+        PPROT         = prot_q;
+        // APB4 write strobes are meaningful for writes. Keep them zero on reads.
+        PSTRB         = write_q ? strb_q : '0;
+        PENABLE       = (state == ACCESS);
+        master_select = (state != IDLE);
+    end
+
+    task automatic latch_request;
+        begin
+            addr_q  <= req_addr;
+            write_q <= req_write;
+            wdata_q <= req_wdata;
+            strb_q  <= req_strb;
+            prot_q  <= req_prot;
+        end
+    endtask
+
+    always_ff @(posedge PCLK or negedge PRESETn) begin
+        if (!PRESETn) begin
+            state     <= IDLE;
+            addr_q    <= '0;
+            write_q   <= 1'b0;
+            wdata_q   <= '0;
+            strb_q    <= '0;
+            prot_q    <= '0;
+            rsp_valid <= 1'b0;
+            rsp_rdata <= '0;
+            rsp_err   <= 1'b0;
+        end else begin
+            // Response is a one-cycle pulse on APB completion.
+            rsp_valid <= 1'b0;
+
+            unique case (state)
+                IDLE: begin
+                    if (req_valid) begin
+                        latch_request();
+                        state <= SETUP;
+                    end
+                end
+
+                SETUP: begin
+                    // APB requires one SETUP cycle with PSEL asserted and
+                    // PENABLE LOW before entering ACCESS.
+                    state <= ACCESS;
+                end
+
+                ACCESS: begin
+                    if (PREADY) begin
+                        rsp_valid <= 1'b1;
+                        rsp_rdata <= PRDATA;
+                        rsp_err   <= PSLVERR;
+
+                        // Accept the next request at the completion boundary.
+                        // The next cycle is SETUP, so PENABLE goes LOW.
+                        if (req_valid) begin
+                            latch_request();
+                            state <= SETUP;
+                        end else begin
+                            state <= IDLE;
+                        end
+                    end
+                end
+
+                default: state <= IDLE;
+            endcase
+        end
+    end
+
+endmodule
+`timescale 1ns/1ps
+
+module apb4_reg_slave #(
+    parameter int ADDR_WIDTH = 32,
+    parameter int DATA_WIDTH = 32,
+    parameter int STRB_WIDTH = DATA_WIDTH/8,
+    parameter int REG_COUNT  = 4,
+    parameter int WAIT_CYCLES = 0,
+    parameter logic [ADDR_WIDTH-1:0] BASE_ADDR = '0
+) (
+    input  logic                  PCLK,
+    input  logic                  PRESETn,
+
+    input  logic [ADDR_WIDTH-1:0] PADDR,
+    input  logic                  PSEL,
+    input  logic                  PENABLE,
+    input  logic                  PWRITE,
+    input  logic [DATA_WIDTH-1:0] PWDATA,
+    input  logic [STRB_WIDTH-1:0] PSTRB,
+    input  logic [2:0]            PPROT,
+
+    output logic                  PREADY,
+    output logic [DATA_WIDTH-1:0] PRDATA,
+    output logic                  PSLVERR
+);
+
+    localparam int BYTES_PER_WORD = DATA_WIDTH / 8;
+    localparam int WAIT_CNT_W = (WAIT_CYCLES < 1) ? 1 : $clog2(WAIT_CYCLES + 1);
+
+    logic [DATA_WIDTH-1:0] regs [0:REG_COUNT-1];
+    logic [WAIT_CNT_W-1:0] wait_count;
+
+    logic [ADDR_WIDTH-1:0] offset;
+    logic                  aligned;
+    logic                  in_range;
+    logic                  addr_valid;
+    integer                reg_index;
+    integer                b;
+    integer                r;
+
+    always_comb begin
+        offset     = PADDR - BASE_ADDR;
+        aligned    = ((offset & (BYTES_PER_WORD - 1)) == 0);
+        in_range   = (PADDR >= BASE_ADDR) && (offset < (REG_COUNT * BYTES_PER_WORD));
+        addr_valid = aligned && in_range;
+        reg_index  = offset / BYTES_PER_WORD;
+    end
+
+    always_comb begin
+        // PREADY may be HIGH outside a transfer. It is sampled only in ACCESS.
+        if (PSEL && PENABLE) begin
+            PREADY = (wait_count >= WAIT_CYCLES);
+        end else begin
+            PREADY = 1'b1;
+        end
+    end
+
+    always_comb begin
+        PRDATA = '0;
+        if (addr_valid) begin
+            PRDATA = regs[reg_index];
+        end
+    end
+
+    // In this project, an invalid/misaligned address inside a selected 4-KiB
+    // window returns PSLVERR on the final ACCESS cycle.
+    always_comb begin
+        PSLVERR = PSEL && PENABLE && PREADY && !addr_valid;
+    end
+
+    always_ff @(posedge PCLK or negedge PRESETn) begin
+        if (!PRESETn) begin
+            wait_count <= '0;
+            for (r = 0; r < REG_COUNT; r = r + 1) begin
+                regs[r] <= '0;
+            end
+        end else begin
+            if (!PSEL || !PENABLE) begin
+                wait_count <= '0;
+            end else if (!PREADY) begin
+                wait_count <= wait_count + 1'b1;
+            end else begin
+                wait_count <= '0;
+            end
+
+            // Register updates occur only on a completed, valid APB write.
+            if (PSEL && PENABLE && PREADY && PWRITE && addr_valid) begin
+                for (b = 0; b < STRB_WIDTH; b = b + 1) begin
+                    if (PSTRB[b]) begin
+                        regs[reg_index][8*b +: 8] <= PWDATA[8*b +: 8];
+                    end
+                end
+            end
+        end
+    end
+
+    // PPROT is accepted as part of the APB4 interface but this simple
+    // register-bank peripheral does not implement protection policy.
+    logic unused_pprot;
+    always_comb unused_pprot = ^PPROT;
+
+endmodule
+`timescale 1ns/1ps
+
+module apb4_resp_mux #(
+    parameter int DATA_WIDTH = 32,
+    parameter int NUM_SLAVES = 4
+) (
+    input  logic [NUM_SLAVES-1:0]                  PSEL,
+    input  logic [NUM_SLAVES-1:0][DATA_WIDTH-1:0]  PRDATA_S,
+    input  logic [NUM_SLAVES-1:0]                  PREADY_S,
+    input  logic [NUM_SLAVES-1:0]                  PSLVERR_S,
+
+    output logic [DATA_WIDTH-1:0]                   PRDATA,
+    output logic                                    PREADY,
+    output logic                                    PSLVERR
+);
+
+    integer i;
+
+    always_comb begin
+        // Safe idle defaults. These outputs are only sampled by the master
+        // in ACCESS. Address decode guarantees one-hot PSEL for mapped traffic.
+        PRDATA  = '0;
+        PREADY  = 1'b1;
+        PSLVERR = 1'b0;
+
+        for (i = 0; i < NUM_SLAVES; i = i + 1) begin
+            if (PSEL[i]) begin
+                PRDATA  = PRDATA_S[i];
+                PREADY  = PREADY_S[i];
+                PSLVERR = PSLVERR_S[i];
+            end
+        end
+    end
+
+endmodule
+`timescale 1ns/1ps
+
+module apb4_system_top #(
+    parameter int ADDR_WIDTH = 32,
+    parameter int DATA_WIDTH = 32,
+    parameter int STRB_WIDTH = DATA_WIDTH/8,
+    parameter int SLAVE_WINDOW_BYTES = 4096,
+    parameter int REG_COUNT = 4,
+    parameter int WAIT_S0 = 0,
+    parameter int WAIT_S1 = 1,
+    parameter int WAIT_S2 = 2,
+    parameter int WAIT_S3 = 3
+) (
+    input  logic                  PCLK,
+    input  logic                  PRESETn,
+
+    input  logic                  req_valid,
+    output logic                  req_ready,
+    input  logic [ADDR_WIDTH-1:0] req_addr,
+    input  logic                  req_write,
+    input  logic [DATA_WIDTH-1:0] req_wdata,
+    input  logic [STRB_WIDTH-1:0] req_strb,
+    input  logic [2:0]            req_prot,
+
+    output logic                  rsp_valid,
+    output logic [DATA_WIDTH-1:0] rsp_rdata,
+    output logic                  rsp_err
+);
+
+    localparam int NUM_SLAVES = 4;
+
+    localparam logic [ADDR_WIDTH-1:0] S0_BASE = 32'h0000_0000;
+    localparam logic [ADDR_WIDTH-1:0] S1_BASE = 32'h0000_1000;
+    localparam logic [ADDR_WIDTH-1:0] S2_BASE = 32'h0000_2000;
+    localparam logic [ADDR_WIDTH-1:0] S3_BASE = 32'h0000_3000;
+
+    // Shared APB bus. These names are intentionally visible for passive DV.
+    logic [ADDR_WIDTH-1:0] paddr;
+    logic                  penable;
+    logic                  pwrite;
+    logic [DATA_WIDTH-1:0] pwdata;
+    logic [STRB_WIDTH-1:0] pstrb;
+    logic [2:0]            pprot;
+    logic                  master_select;
+    logic [NUM_SLAVES-1:0] psel;
+
+    logic                  pready;
+    logic [DATA_WIDTH-1:0] prdata;
+    logic                  pslverr;
+
+    logic [NUM_SLAVES-1:0][DATA_WIDTH-1:0] prdata_s;
+    logic [NUM_SLAVES-1:0]                 pready_s;
+    logic [NUM_SLAVES-1:0]                 pslverr_s;
+
+    apb4_master #(
+        .ADDR_WIDTH (ADDR_WIDTH),
+        .DATA_WIDTH (DATA_WIDTH),
+        .STRB_WIDTH (STRB_WIDTH)
+    ) u_master (
+        .PCLK, .PRESETn,
+        .req_valid, .req_ready, .req_addr, .req_write,
+        .req_wdata, .req_strb, .req_prot,
+        .rsp_valid, .rsp_rdata, .rsp_err,
+        .PADDR(paddr), .PENABLE(penable), .PWRITE(pwrite),
+        .PWDATA(pwdata), .PSTRB(pstrb), .PPROT(pprot),
+        .master_select,
+        .PREADY(pready), .PRDATA(prdata), .PSLVERR(pslverr)
+    );
+
+    apb4_addr_decoder #(
+        .ADDR_WIDTH(ADDR_WIDTH),
+        .NUM_SLAVES(NUM_SLAVES),
+        .BASE_ADDR(S0_BASE),
+        .SLAVE_WINDOW_BYTES(SLAVE_WINDOW_BYTES)
+    ) u_decoder (
+        .PADDR(paddr),
+        .master_select(master_select),
+        .PSEL(psel)
+    );
+
+    apb4_reg_slave #(
+        .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH), .STRB_WIDTH(STRB_WIDTH),
+        .REG_COUNT(REG_COUNT), .WAIT_CYCLES(WAIT_S0), .BASE_ADDR(S0_BASE)
+    ) u_s0 (
+        .PCLK, .PRESETn, .PADDR(paddr), .PSEL(psel[0]), .PENABLE(penable),
+        .PWRITE(pwrite), .PWDATA(pwdata), .PSTRB(pstrb), .PPROT(pprot),
+        .PREADY(pready_s[0]), .PRDATA(prdata_s[0]), .PSLVERR(pslverr_s[0])
+    );
+
+    apb4_reg_slave #(
+        .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH), .STRB_WIDTH(STRB_WIDTH),
+        .REG_COUNT(REG_COUNT), .WAIT_CYCLES(WAIT_S1), .BASE_ADDR(S1_BASE)
+    ) u_s1 (
+        .PCLK, .PRESETn, .PADDR(paddr), .PSEL(psel[1]), .PENABLE(penable),
+        .PWRITE(pwrite), .PWDATA(pwdata), .PSTRB(pstrb), .PPROT(pprot),
+        .PREADY(pready_s[1]), .PRDATA(prdata_s[1]), .PSLVERR(pslverr_s[1])
+    );
+
+    apb4_reg_slave #(
+        .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH), .STRB_WIDTH(STRB_WIDTH),
+        .REG_COUNT(REG_COUNT), .WAIT_CYCLES(WAIT_S2), .BASE_ADDR(S2_BASE)
+    ) u_s2 (
+        .PCLK, .PRESETn, .PADDR(paddr), .PSEL(psel[2]), .PENABLE(penable),
+        .PWRITE(pwrite), .PWDATA(pwdata), .PSTRB(pstrb), .PPROT(pprot),
+        .PREADY(pready_s[2]), .PRDATA(prdata_s[2]), .PSLVERR(pslverr_s[2])
+    );
+
+    apb4_reg_slave #(
+        .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH), .STRB_WIDTH(STRB_WIDTH),
+        .REG_COUNT(REG_COUNT), .WAIT_CYCLES(WAIT_S3), .BASE_ADDR(S3_BASE)
+    ) u_s3 (
+        .PCLK, .PRESETn, .PADDR(paddr), .PSEL(psel[3]), .PENABLE(penable),
+        .PWRITE(pwrite), .PWDATA(pwdata), .PSTRB(pstrb), .PPROT(pprot),
+        .PREADY(pready_s[3]), .PRDATA(prdata_s[3]), .PSLVERR(pslverr_s[3])
+    );
+
+    apb4_resp_mux #(
+        .DATA_WIDTH(DATA_WIDTH),
+        .NUM_SLAVES(NUM_SLAVES)
+    ) u_rsp_mux (
+        .PSEL(psel),
+        .PRDATA_S(prdata_s),
+        .PREADY_S(pready_s),
+        .PSLVERR_S(pslverr_s),
+        .PRDATA(prdata),
+        .PREADY(pready),
+        .PSLVERR(pslverr)
+    );
+
+endmodule

@@ -1,0 +1,25 @@
+# Simulation / compilation
+build/
+work/
+transcript
+vsim.wlf
+*.vvp
+*.vcd
+*.fst
+*.wlf
+*.ucdb
+*.log
+*.jou
+*.pb
+*.daidir/
+csrc/
+simv*
+INCA_libs/
+*.key
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*~
