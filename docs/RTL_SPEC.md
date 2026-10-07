@@ -50,7 +50,7 @@ The decoder is combinational. When `master_select=1`, exactly one `PSEL` bit is 
 
 ## 5. APB4 write strobes
 
-For 32-bit data, `PSTRB[3:0]` maps one bit to each byte of `PWDATA`. The peripheral updates only bytes whose strobe bit is HIGH. On reads, the master drives `PSTRB=0` as a project protocol policy.
+For 32-bit data, `PSTRB[3:0]` maps one bit to each byte of `PWDATA`. The peripheral updates only bytes whose strobe bit is HIGH. On reads, the master drives `PSTRB=0`, as required by APB.
 
 ## 6. Peripheral response
 
@@ -67,6 +67,10 @@ Each peripheral:
 ## 7. Response mux
 
 Only the response from the one-hot selected slave is forwarded. Idle defaults are `PREADY=1`, `PRDATA=0`, `PSLVERR=0`; these values are ignored when there is no active APB transfer.
+An active decode miss uses an internal default responder: `PSEL=0`, `PREADY=1`,
+`PSLVERR=1` in ACCESS, and `PRDATA=0`. The upstream response reports an error.
+The internal `master_select` distinguishes a decode miss from idle. No external
+APB transfer is asserted to an unmapped peripheral.
 
 ## 8. RTL coding rules used
 
@@ -77,3 +81,23 @@ Only the response from the one-hot selected slave is forwarded. Idle defaults ar
 - no testbench constructs in `rtl/`,
 - one function per block responsibility,
 - explicit defaults in combinational logic to avoid latches.
+
+## 9. Configuration and reset contract
+
+The supported reference configuration is 32-bit address/data, four registers per
+slave and wait counts 0/1/2/3. All slave bases derive from `SLAVE_WINDOW_BYTES`.
+The additional 2048-byte-window smoke test exercises this relationship. Choose a
+positive, word-aligned window that contains the register bank and fits four windows
+in the address space; arbitrary widths/counts have not been exhaustively tested.
+
+`req_ready=0` during reset. Reset aborts in-flight traffic, clears registers and
+suppresses the response. The upstream response has no ready/backpressure signal;
+its consumer must capture each one-cycle `rsp_valid` pulse. UVM's driver retries
+its interrupted item after reset, while monitors discard aborted transactions and
+the reference model is reset to zero.
+
+Protocol references: Arm AMBA APB, IHI 0024 (APB4 introduced in Issue C).
+The Issue E sections on operating states, write strobes and error response also
+cover these APB4 rules: https://documentation-service.arm.com/static/63fe2c1356ea36189d4e79f3
+`PSLVERR=0` outside completion is this project's stricter policy; Arm recommends
+but does not require it. No APB5-only features are implemented.

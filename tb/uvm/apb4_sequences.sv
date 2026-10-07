@@ -35,11 +35,11 @@ class apb4_strb_seq extends apb4_base_seq;
     function new(string name = "apb4_strb_seq"); super.new(name); endfunction
 
     task body();
-        send(32'h0000_0000, 1, 32'h1122_3344, 4'b1111);
-        send(32'h0000_0000, 1, 32'hAAAA_BBBB, 4'b0001);
-        send(32'h0000_0000, 1, 32'hCCCC_DDDD, 4'b0010);
-        send(32'h0000_0000, 1, 32'h1234_5678, 4'b1100);
-        send(32'h0000_0000, 0, '0, 4'h0);
+        for (int s = 0; s < 4; s++)
+            for (int mask = 0; mask < 16; mask++) begin
+                send(s*32'h1000, 1, 32'hA5C3_7E19 ^ (32'h1020_4081*mask), 4'(mask));
+                send(s*32'h1000, 0, '0, 4'h0);
+            end
     endtask
 endclass
 
@@ -48,6 +48,9 @@ class apb4_error_seq extends apb4_base_seq;
     function new(string name = "apb4_error_seq"); super.new(name); endfunction
 
     task body();
+        send(32'h0000_4000, 0, '0, 4'h0);
+        send(32'hFFFF_FFFC, 1, 32'hDEAD_BEEF, 4'hF);
+        send(32'h0000_1002, 1, 32'h1234_5678, 4'hF);
         // Inside mapped slave windows but outside the implemented register bank.
         send(32'h0000_0100, 0, '0, 4'h0);
         send(32'h0000_1100, 1, 32'hDEAD_BEEF, 4'hF);
@@ -72,7 +75,7 @@ class apb4_random_seq extends apb4_base_seq;
             s  = $urandom_range(0, 3);
             wr = $urandom_range(0, 1);
             d  = $urandom;
-            st = $urandom_range(1, 15);
+            st = $urandom_range(0, 15);
             pr = $urandom_range(0, 7);
 
             if ($urandom_range(0, 9) < 8) begin

@@ -23,7 +23,7 @@ Demonstrate that the integrated requester/decoder/peripheral/response-mux subsys
 - upstream stimulus tasks,
 - a software register reference model,
 - automatic expected-error prediction,
-- byte-strobe merge logic,
+- byte-strobe merge logic and exact per-slave wait-count checking,
 - protocol monitor checks,
 - directed tests,
 - 250-transfer randomized regression,
@@ -58,7 +58,7 @@ The driver is intentionally not the scoreboard source. The monitor is the observ
 | T04 | Write/read each register in S2 | Data matches with 2 wait cycles |
 | T05 | Write/read each register in S3 | Data matches with 3 wait cycles |
 | T06 | Partial byte writes | Only strobed bytes change |
-| T07 | Read transfers | `PSTRB==0` project policy |
+| T07 | Read transfers | `PSTRB==0` APB requirement |
 | T08 | Invalid local offset | `PSLVERR==1` on completion |
 | T09 | Back-to-back transfers | second transfer enters SETUP; no illegal continuous PENABLE |
 | T10 | Wait-state stability | address/control/data/select remain stable while `PREADY=0` |
@@ -70,7 +70,7 @@ The driver is intentionally not the scoreboard source. The monitor is the observ
 `tb/sva/apb4_protocol_sva.sv` checks:
 
 - `$onehot0(PSEL)`,
-- ACCESS has a selected peripheral in this integrated design,
+- ACCESS has an active request; decode misses use the internal error responder,
 - SETUP -> ACCESS sequencing,
 - stable request signals across SETUP and wait-state extension,
 - `PENABLE` drops after completion,
@@ -83,10 +83,11 @@ Coverage points:
 
 - all four slaves,
 - read and write,
-- representative `PSTRB` patterns,
+- all 16 `PSTRB` patterns (including zero),
 - 0/1/2/3 wait-state bins,
 - error and non-error completion,
-- crosses: slave x RW, RW x error, slave x wait.
+- crosses: slave x RW (including decode miss), RW x error;
+- explicit legal latency pairs: S0/0, S1/1, S2/2, S3/3.
 
 A real company closure target is project-dependent; for this portfolio project, target 100% planned functional bins and zero assertion/scoreboard errors. Code coverage should be reviewed for statement/branch/toggle coverage rather than accepted blindly as a single percentage.
 
@@ -100,3 +101,28 @@ A real company closure target is project-dependent; for this portfolio project, 
 - RTL lint has no unexplained warnings.
 - Reset behavior and error behavior are documented.
 - Waveform spot-check confirms IDLE -> SETUP -> ACCESS timing.
+
+## 7. Additional closure checks
+
+| ID | Scenario | Checker / evidence |
+|---|---|---|
+| T13 | Unmapped read/write | Error response and zero-wait default responder |
+| T14 | All 16 strobe masks on each slave | Immediate readback; zero mask preserves data |
+| T15 | Non-default 2048-byte window | Independent parameter smoke test |
+| T16 | Known response values | Four-state Icarus checks; UVM logic fields and X checks |
+| T17 | Checker sensitivity | Four mutations must fail for their intended diagnostic |
+| T18 | UVM reset during S3 wait | `+RESET_DURING_WAIT`; reset model and retry aborted item |
+| T19 | Request/response forwarding | UVM correlates upstream and APB transactions |
+
+UVM bus completions feed both coverage and the scoreboard. The scoreboard checks
+selected slave, exact wait count, request forwarding (including PPROT), and response
+forwarding. End-of-test checks reject unmatched transactions and zero checked traffic.
+Monitors are allowed two sample clocks to drain before dropping the test objection.
+Reset assertions span several clocks, as required by the testbench's sampled reset
+monitor. Short asynchronous reset-pulse verification is outside the current scope.
+
+The default map and wait counts are independently specified in the checkers; do not
+derive expected wait counts from DUT parameters or internal counters, which would
+hide a configuration defect. If a new valid configuration is added, update its
+verification contract explicitly. Coverage targets are goals, not measured results:
+Questa execution and actual coverage reports remain required for UVM closure.

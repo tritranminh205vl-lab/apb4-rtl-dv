@@ -53,7 +53,7 @@ module apb4_master #(
     // that the current APB access completes. This permits back-to-back
     // APB transfers while still inserting the mandatory SETUP phase.
     always_comb begin
-        req_ready = (state == IDLE) || ((state == ACCESS) && PREADY);
+        req_ready = PRESETn && ((state == IDLE) || ((state == ACCESS) && PREADY));
     end
 
     always_comb begin

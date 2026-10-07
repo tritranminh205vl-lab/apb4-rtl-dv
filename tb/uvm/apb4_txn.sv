@@ -5,13 +5,14 @@ class apb4_txn extends uvm_sequence_item;
     rand bit [3:0]  strb;
     rand bit [2:0]  prot;
 
-    bit [31:0] rdata;
-    bit        err;
+    logic [31:0] rdata;
+    logic        err;
+    bit          is_reset;
     int unsigned slave;
     int unsigned wait_cycles;
 
     constraint c_word_aligned { addr[1:0] == 2'b00; }
-    constraint c_nonzero_strb { if (write) strb != 4'b0000; }
+    // Zero-strobe writes are legal and must leave register contents unchanged.
 
     `uvm_object_utils_begin(apb4_txn)
         `uvm_field_int(addr,        UVM_ALL_ON)

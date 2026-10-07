@@ -1,37 +1,4 @@
-// Code your testbench here
-// or browse Examples
-`timescale 1ns/1ps
-
-module apb4_addr_decoder #(
-    parameter int ADDR_WIDTH = 32,
-    parameter int NUM_SLAVES = 4,
-    parameter logic [ADDR_WIDTH-1:0] BASE_ADDR = '0,
-    parameter int unsigned SLAVE_WINDOW_BYTES = 4096
-) (
-    input  logic [ADDR_WIDTH-1:0]     PADDR,
-    input  logic                      master_select,
-    output logic [NUM_SLAVES-1:0]     PSEL
-);
-
-    integer i;
-    logic [ADDR_WIDTH-1:0] low_addr;
-    logic [ADDR_WIDTH-1:0] high_addr;
-
-    always_comb begin
-        PSEL = '0;
-
-        if (master_select) begin
-            for (i = 0; i < NUM_SLAVES; i = i + 1) begin
-                low_addr  = BASE_ADDR + (i * SLAVE_WINDOW_BYTES);
-                high_addr = BASE_ADDR + ((i + 1) * SLAVE_WINDOW_BYTES);
-                if ((PADDR >= low_addr) && (PADDR < high_addr)) begin
-                    PSEL[i] = 1'b1;
-                end
-            end
-        end
-    end
-
-endmodule
+// Generated from rtl/files.f; compile this file OR the separate RTL sources.
 `timescale 1ns/1ps
 
 module apb4_master #(
@@ -87,7 +54,7 @@ module apb4_master #(
     // that the current APB access completes. This permits back-to-back
     // APB transfers while still inserting the mandatory SETUP phase.
     always_comb begin
-        req_ready = (state == IDLE) || ((state == ACCESS) && PREADY);
+        req_ready = PRESETn && ((state == IDLE) || ((state == ACCESS) && PREADY));
     end
 
     always_comb begin
@@ -163,6 +130,81 @@ module apb4_master #(
     end
 
 endmodule
+
+`timescale 1ns/1ps
+
+module apb4_addr_decoder #(
+    parameter int ADDR_WIDTH = 32,
+    parameter int NUM_SLAVES = 4,
+    parameter logic [ADDR_WIDTH-1:0] BASE_ADDR = '0,
+    parameter int SLAVE_WINDOW_BYTES = 4096
+) (
+    input  logic [ADDR_WIDTH-1:0]     PADDR,
+    input  logic                      master_select,
+    output logic [NUM_SLAVES-1:0]     PSEL
+);
+
+    integer i;
+    logic [ADDR_WIDTH-1:0] low_addr;
+    logic [ADDR_WIDTH-1:0] high_addr;
+
+    always_comb begin
+        PSEL = '0;
+        low_addr = '0;
+        high_addr = '0;
+
+        if (master_select) begin
+            for (i = 0; i < NUM_SLAVES; i = i + 1) begin
+                low_addr  = BASE_ADDR + (i * SLAVE_WINDOW_BYTES);
+                high_addr = BASE_ADDR + ((i + 1) * SLAVE_WINDOW_BYTES);
+                if ((PADDR >= low_addr) && (PADDR < high_addr)) begin
+                    PSEL[i] = 1'b1;
+                end
+            end
+        end
+    end
+
+endmodule
+
+`timescale 1ns/1ps
+
+module apb4_resp_mux #(
+    parameter int DATA_WIDTH = 32,
+    parameter int NUM_SLAVES = 4
+) (
+    input  logic                                  master_select,
+    input  logic                                  PENABLE,
+    input  logic [NUM_SLAVES-1:0]                  PSEL,
+    input  logic [NUM_SLAVES-1:0][DATA_WIDTH-1:0]  PRDATA_S,
+    input  logic [NUM_SLAVES-1:0]                  PREADY_S,
+    input  logic [NUM_SLAVES-1:0]                  PSLVERR_S,
+
+    output logic [DATA_WIDTH-1:0]                   PRDATA,
+    output logic                                    PREADY,
+    output logic                                    PSLVERR
+);
+
+    integer i;
+
+    always_comb begin
+        // Safe idle defaults. These outputs are only sampled by the master
+        // in ACCESS. Address decode guarantees one-hot PSEL for mapped traffic.
+        PRDATA  = '0;
+        PREADY  = 1'b1;
+        // Internal default responder: an active decode miss completes with error.
+        PSLVERR = master_select && PENABLE && (PSEL == '0);
+
+        for (i = 0; i < NUM_SLAVES; i = i + 1) begin
+            if (PSEL[i]) begin
+                PRDATA  = PRDATA_S[i];
+                PREADY  = PREADY_S[i];
+                PSLVERR = PSLVERR_S[i];
+            end
+        end
+    end
+
+endmodule
+
 `timescale 1ns/1ps
 
 module apb4_reg_slave #(
@@ -199,22 +241,23 @@ module apb4_reg_slave #(
     logic                  aligned;
     logic                  in_range;
     logic                  addr_valid;
-    integer                reg_index;
+    localparam int INDEX_W = (REG_COUNT <= 1) ? 1 : $clog2(REG_COUNT);
+    logic [INDEX_W-1:0] reg_index;
     integer                b;
     integer                r;
 
     always_comb begin
         offset     = PADDR - BASE_ADDR;
         aligned    = ((offset & (BYTES_PER_WORD - 1)) == 0);
-        in_range   = (PADDR >= BASE_ADDR) && (offset < (REG_COUNT * BYTES_PER_WORD));
+        in_range   = (offset < (REG_COUNT * BYTES_PER_WORD));
         addr_valid = aligned && in_range;
-        reg_index  = offset / BYTES_PER_WORD;
+        reg_index  = INDEX_W'(offset / BYTES_PER_WORD);
     end
 
     always_comb begin
         // PREADY may be HIGH outside a transfer. It is sampled only in ACCESS.
         if (PSEL && PENABLE) begin
-            PREADY = (wait_count >= WAIT_CYCLES);
+            PREADY = (wait_count == WAIT_CNT_W'(WAIT_CYCLES));
         end else begin
             PREADY = 1'b1;
         end
@@ -265,41 +308,7 @@ module apb4_reg_slave #(
     always_comb unused_pprot = ^PPROT;
 
 endmodule
-`timescale 1ns/1ps
 
-module apb4_resp_mux #(
-    parameter int DATA_WIDTH = 32,
-    parameter int NUM_SLAVES = 4
-) (
-    input  logic [NUM_SLAVES-1:0]                  PSEL,
-    input  logic [NUM_SLAVES-1:0][DATA_WIDTH-1:0]  PRDATA_S,
-    input  logic [NUM_SLAVES-1:0]                  PREADY_S,
-    input  logic [NUM_SLAVES-1:0]                  PSLVERR_S,
-
-    output logic [DATA_WIDTH-1:0]                   PRDATA,
-    output logic                                    PREADY,
-    output logic                                    PSLVERR
-);
-
-    integer i;
-
-    always_comb begin
-        // Safe idle defaults. These outputs are only sampled by the master
-        // in ACCESS. Address decode guarantees one-hot PSEL for mapped traffic.
-        PRDATA  = '0;
-        PREADY  = 1'b1;
-        PSLVERR = 1'b0;
-
-        for (i = 0; i < NUM_SLAVES; i = i + 1) begin
-            if (PSEL[i]) begin
-                PRDATA  = PRDATA_S[i];
-                PREADY  = PREADY_S[i];
-                PSLVERR = PSLVERR_S[i];
-            end
-        end
-    end
-
-endmodule
 `timescale 1ns/1ps
 
 module apb4_system_top #(
@@ -332,9 +341,9 @@ module apb4_system_top #(
     localparam int NUM_SLAVES = 4;
 
     localparam logic [ADDR_WIDTH-1:0] S0_BASE = 32'h0000_0000;
-    localparam logic [ADDR_WIDTH-1:0] S1_BASE = 32'h0000_1000;
-    localparam logic [ADDR_WIDTH-1:0] S2_BASE = 32'h0000_2000;
-    localparam logic [ADDR_WIDTH-1:0] S3_BASE = 32'h0000_3000;
+    localparam logic [ADDR_WIDTH-1:0] S1_BASE = ADDR_WIDTH'(1 * SLAVE_WINDOW_BYTES);
+    localparam logic [ADDR_WIDTH-1:0] S2_BASE = ADDR_WIDTH'(2 * SLAVE_WINDOW_BYTES);
+    localparam logic [ADDR_WIDTH-1:0] S3_BASE = ADDR_WIDTH'(3 * SLAVE_WINDOW_BYTES);
 
     // Shared APB bus. These names are intentionally visible for passive DV.
     logic [ADDR_WIDTH-1:0] paddr;
@@ -420,6 +429,7 @@ module apb4_system_top #(
         .DATA_WIDTH(DATA_WIDTH),
         .NUM_SLAVES(NUM_SLAVES)
     ) u_rsp_mux (
+        .master_select(master_select), .PENABLE(penable),
         .PSEL(psel),
         .PRDATA_S(prdata_s),
         .PREADY_S(pready_s),

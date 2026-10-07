@@ -27,5 +27,6 @@ class apb4_env extends uvm_env;
         drv.seq_item_port.connect(seqr.seq_item_export);
         up_mon.ap.connect(scb.imp);
         bus_mon.ap.connect(cov.analysis_export);
+        bus_mon.ap.connect(scb.bus_imp);
     endfunction
 endclass

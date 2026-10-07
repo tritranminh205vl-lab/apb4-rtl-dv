@@ -21,7 +21,6 @@ module tb_apb4_system;
     logic [31:0] model [0:3][0:3];
     integer errors;
     integer checks;
-    integer i, j;
 
     apb4_system_top #(
         .WAIT_S0(0),
@@ -35,6 +34,14 @@ module tb_apb4_system;
         .rsp_valid, .rsp_rdata, .rsp_err
     );
 
+`ifdef ENABLE_SVA
+    apb4_protocol_sva u_sva (
+        .PCLK, .PRESETn, .master_select(dut.master_select),
+        .PADDR(dut.paddr), .PSEL(dut.psel), .PENABLE(dut.penable),
+        .PWRITE(dut.pwrite), .PWDATA(dut.pwdata), .PSTRB(dut.pstrb),
+        .PPROT(dut.pprot), .PREADY(dut.pready), .PRDATA(dut.prdata), .PSLVERR(dut.pslverr)
+    );
+`endif
     initial PCLK = 1'b0;
     always #5 PCLK = ~PCLK;
   initial begin
@@ -203,41 +210,19 @@ end
             req_wdata = 32'h3333_4444;
             do @(posedge PCLK); while (!req_ready);
 
-           // At this point transfer 1 has completed and transfer 2 has
-// been accepted on the same completion boundary.
-//
-// rsp_valid currently belongs to transfer 1.
-
-@(negedge PCLK);
-
-req_valid = 1'b0;
-
-// Capture response of transfer 1.
-if (!rsp_valid) begin
-    $error("Missing response for first back-to-back transfer");
-    errors = errors + 1;
-end
-
-err_first = rsp_err;
-
-
-// Wait until response pulse of transfer 1 disappears.
-while (rsp_valid)
-    @(negedge PCLK);
-
-
-// Now wait for response belonging to transfer 2.
-while (!rsp_valid)
-    @(negedge PCLK);
-
-err_second  = rsp_err;
-rdata_dummy = rsp_rdata;
-
-
-// Wait until transfer-2 response is completely consumed.
-// This prevents the following read from seeing stale rsp_valid.
-while (rsp_valid)
-    @(negedge PCLK);
+            // First response is visible after the completion edge (NBA).
+            @(negedge PCLK);
+            req_valid = 1'b0;
+            if (!rsp_valid) begin
+                $error("Missing response for first back-to-back transfer");
+                errors = errors + 1;
+            end
+            err_first = rsp_err;
+            while (rsp_valid) @(negedge PCLK);
+            while (!rsp_valid) @(negedge PCLK);
+            err_second = rsp_err;
+            rdata_dummy = rsp_rdata;
+            while (rsp_valid) @(negedge PCLK);
             if (err_first || err_second) begin
                 $error("Unexpected error in back-to-back valid writes");
                 errors = errors + 1;
@@ -253,6 +238,9 @@ while (rsp_valid)
     // ----------------------------
     // Lightweight protocol monitor
     // ----------------------------
+    integer observed_waits;
+    integer selected_slave;
+    logic [3:0] expected_select;
     logic prev_wait;
     logic prev_setup;
     logic prev_complete;
@@ -268,8 +256,8 @@ while (rsp_valid)
     endfunction
 
     always @(posedge PCLK) begin
-        #1;
         if (!PRESETn) begin
+            observed_waits = 0;
             prev_wait     = 1'b0;
             prev_setup    = 1'b0;
             prev_complete = 1'b0;
@@ -285,23 +273,49 @@ while (rsp_valid)
                 errors = errors + 1;
             end
 
-            if (dut.penable && (dut.psel == 0)) begin
-                $error("Protocol: PENABLE asserted without any selected slave");
-                errors = errors + 1;
+            if (dut.master_select) begin
+                selected_slave = slave_of(dut.paddr);
+                expected_select = (selected_slave < 0) ? 4'b0000 : (4'b0001 << selected_slave);
+                if (dut.psel !== expected_select) begin
+                    $error("Decode mismatch addr=%h psel=%b expected=%b", dut.paddr, dut.psel, expected_select);
+                    errors = errors + 1;
+                end
+                if (!dut.penable) observed_waits = 0;
+                else if (!dut.pready) observed_waits = observed_waits + 1;
+                else begin
+                    if (observed_waits != ((selected_slave < 0) ? 0 : selected_slave)) begin
+                        $error("WAIT mismatch slave=%0d got=%0d expected=%0d", selected_slave,
+                               observed_waits, (selected_slave < 0) ? 0 : selected_slave);
+                        errors = errors + 1;
+                    end
+                end
+            end
+            if (((^{dut.master_select,dut.psel,dut.penable,req_ready,rsp_valid}) === 1'bx)) begin
+                $error("Unknown bus/handshake control"); errors = errors + 1;
+            end
+            if (dut.master_select && ((^{dut.paddr,dut.pwrite,dut.pstrb,dut.pprot}) === 1'bx)) begin
+                $error("Unknown request fields"); errors = errors + 1;
+            end
+            if (dut.master_select && dut.penable && $isunknown(dut.pready)) begin
+                $error("Unknown PREADY"); errors = errors + 1;
+            end
+            if (dut.master_select && dut.penable && dut.pready &&
+                ($isunknown(dut.pslverr) || (!dut.pwrite && $isunknown(dut.prdata)))) begin
+                $error("Unknown response fields"); errors = errors + 1;
             end
 
-            if ((dut.psel != 0) && !dut.pwrite && (dut.pstrb != 0)) begin
+            if (dut.master_select && !dut.pwrite && (dut.pstrb != 0)) begin
                 $error("Protocol: PSTRB must be zero for project read transfers");
                 errors = errors + 1;
             end
 
-            if (dut.pslverr && !((dut.psel != 0) && dut.penable && dut.pready)) begin
+            if (dut.pslverr && !(dut.master_select && dut.penable && dut.pready)) begin
                 $error("Protocol: PSLVERR observed outside completed ACCESS");
                 errors = errors + 1;
             end
 
             if (prev_setup) begin
-                if (!(dut.penable && (dut.psel != 0))) begin
+                if (!(dut.penable && dut.master_select)) begin
                     $error("Protocol: SETUP was not followed by ACCESS");
                     errors = errors + 1;
                 end
@@ -313,7 +327,7 @@ while (rsp_valid)
             end
 
             if (prev_wait) begin
-                if (!(dut.penable && (dut.psel != 0))) begin
+                if (!(dut.penable && dut.master_select)) begin
                     $error("Protocol: ACCESS dropped while PREADY was LOW");
                     errors = errors + 1;
                 end
@@ -329,9 +343,9 @@ while (rsp_valid)
                 errors = errors + 1;
             end
 
-            prev_setup    = ((dut.psel != 0) && !dut.penable);
-            prev_wait     = ((dut.psel != 0) && dut.penable && !dut.pready);
-            prev_complete = ((dut.psel != 0) && dut.penable && dut.pready);
+            prev_setup    = (dut.master_select && !dut.penable);
+            prev_wait     = (dut.master_select && dut.penable && !dut.pready);
+            prev_complete = (dut.master_select && dut.penable && dut.pready);
             prev_paddr    = dut.paddr;
             prev_pwrite   = dut.pwrite;
             prev_pwdata   = dut.pwdata;
@@ -365,16 +379,18 @@ while (rsp_valid)
             clear_model();
             repeat (2) @(posedge PCLK);
 
-            if (dut.penable || (dut.psel != 0)) begin
+            if (dut.penable || dut.master_select) begin
                 $error("Reset did not return APB controller to IDLE");
                 errors = errors + 1;
             end
 
             // Verify that the peripheral register banks were reset.
-            checked_xfer(32'h0000_0000, 1'b0, '0, 4'h0, 3'b000);
-            checked_xfer(32'h0000_1000, 1'b0, '0, 4'h0, 3'b000);
-            checked_xfer(32'h0000_2000, 1'b0, '0, 4'h0, 3'b000);
-            checked_xfer(32'h0000_3000, 1'b0, '0, 4'h0, 3'b000);
+            if (rsp_valid) begin
+                $error("Aborted transfer produced a response after reset"); errors = errors + 1;
+            end
+            for (int s = 0; s < 4; s++)
+                for (int r = 0; r < 4; r++)
+                    checked_xfer(s*32'h1000+r*4, 1'b0, '0, 4'h0, 3'b000);
         end
     endtask
 
@@ -385,7 +401,12 @@ while (rsp_valid)
         int s;
         int r;
         int n;
+        integer seed, seed_state, random_discard;
 
+        if (!$value$plusargs("SEED=%d", seed)) seed = 1;
+        seed_state = seed;
+        random_discard = $urandom(seed_state);
+        $display("[CONFIG] seed=%0d", seed);
         errors = 0;
         checks = 0;
         clear_model();
@@ -407,6 +428,17 @@ while (rsp_valid)
         checked_xfer(32'h0000_0000, 1'b1, 32'hCCCC_DDDD, 4'b1100, 3'b000);
         checked_xfer(32'h0000_0000, 1'b0, '0, 4'h0, 3'b000);
 
+        $display("[TEST] all 16 write-strobe patterns with immediate readback");
+        for (s = 0; s < 4; s++) begin
+            for (n = 0; n < 16; n++) begin
+                checked_xfer(s*32'h1000, 1'b1, 32'hA5C3_7E19 ^ (32'h1020_4081*n), 4'(n), 3'b000);
+                checked_xfer(s*32'h1000, 1'b0, '0, 4'h0, 3'b000);
+            end
+        end
+        $display("[TEST] decode misses");
+        checked_xfer(32'h0000_4000, 1'b0, '0, 4'h0, 3'b000);
+        checked_xfer(32'hFFFF_FFFC, 1'b1, 32'hDEAD_BEEF, 4'hF, 3'b000);
+
         $display("[TEST] error response on invalid local offsets / alignment");
         checked_xfer(32'h0000_0100, 1'b0, '0, 4'h0, 3'b000);
         checked_xfer(32'h0000_1002, 1'b1, 32'h1234_5678, 4'hF, 3'b000);
@@ -427,10 +459,13 @@ while (rsp_valid)
                 addr = (s * 32'h1000) + 32'h100 + (4 * $urandom_range(0, 15));
             end
             data = $urandom;
-            strb = $urandom_range(1, 15);
+            strb = 4'($urandom_range(0, 15));
             checked_xfer(addr, $urandom_range(0, 1), data, strb, $urandom_range(0, 7));
         end
 
+        for (s = 0; s < 4; s++)
+            for (r = 0; r < 4; r++)
+                checked_xfer(s*32'h1000+r*4, 1'b0, '0, 4'h0, 3'b000);
         mid_transfer_reset_test();
 
         repeat (5) @(posedge PCLK);

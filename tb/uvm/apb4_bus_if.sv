@@ -2,6 +2,7 @@
 
 interface apb4_bus_if(input logic PCLK);
     logic          PRESETn;
+    logic          master_select;
     logic [31:0]   PADDR;
     logic [3:0]    PSEL;
     logic          PENABLE;
@@ -15,7 +16,7 @@ interface apb4_bus_if(input logic PCLK);
 
     clocking mon_cb @(posedge PCLK);
         default input #1step;
-        input PRESETn, PADDR, PSEL, PENABLE, PWRITE, PWDATA, PSTRB,
+        input PRESETn, master_select, PADDR, PSEL, PENABLE, PWRITE, PWDATA, PSTRB,
               PPROT, PREADY, PRDATA, PSLVERR;
     endclocking
 endinterface

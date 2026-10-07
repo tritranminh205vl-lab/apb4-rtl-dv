@@ -1,18 +1,32 @@
 name: APB4 RTL Regression
-
-on:
-  push:
-  pull_request:
-
+on: [push, pull_request]
 jobs:
   basic-regression:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Icarus Verilog
-        run: sudo apt-get update && sudo apt-get install -y iverilog
-
-      - name: Run self-checking RTL regression
-        run: make basic
+      - uses: actions/checkout@v4
+      - name: Install simulators
+        run: sudo apt-get update && sudo apt-get install -y iverilog verilator
+      - name: RTL lint
+        run: make lint
+      - name: Icarus regression (three reproducible seeds)
+        run: |
+          mkdir -p build/logs
+          set -o pipefail
+          for seed in 1 17 2026; do
+            SEED=$seed make basic 2>&1 | tee build/logs/basic-$seed.log
+          done
+      - name: Checker mutation tests
+        run: |
+          set -o pipefail
+          make mutations 2>&1 | tee build/logs/mutations.log
+      - name: Verilator regression with SVA
+        run: |
+          set -o pipefail
+          make verilator 2>&1 | tee build/logs/verilator.log
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-logs
+          path: build/logs/

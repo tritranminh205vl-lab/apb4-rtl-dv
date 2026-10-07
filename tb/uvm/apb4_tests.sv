@@ -16,6 +16,7 @@ class apb4_base_test extends uvm_test;
         phase.raise_objection(this);
         seq = apb4_smoke_seq::type_id::create("seq");
         seq.start(env.seqr);
+        repeat (2) @(env.up_mon.vif.mon_cb);
         phase.drop_objection(this);
     endtask
 endclass
@@ -46,6 +47,7 @@ class apb4_regression_test extends apb4_base_test;
         err.start(env.seqr);
         rnd.start(env.seqr);
 
+        repeat (2) @(env.up_mon.vif.mon_cb);
         phase.drop_objection(this);
     endtask
 endclass

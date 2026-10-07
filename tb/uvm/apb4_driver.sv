@@ -27,7 +27,22 @@ class apb4_driver extends uvm_driver #(apb4_txn);
 
         forever begin
             seq_item_port.get_next_item(tr);
-            drive_one(tr);
+            begin
+                bit completed;
+                do begin
+                    completed = 0;
+                    wait (vif.PRESETn === 1'b1);
+                    fork : transfer_or_reset
+                        begin drive_one(tr); completed = 1; end
+                        begin @(negedge vif.PRESETn); end
+                    join_any
+                    disable transfer_or_reset;
+                    if (!completed) begin
+                        @(vif.drv_cb);
+                        vif.drv_cb.req_valid <= 1'b0;
+                    end
+                end while (!completed);
+            end
             seq_item_port.item_done();
         end
     endtask

@@ -34,22 +34,23 @@ module apb4_reg_slave #(
     logic                  aligned;
     logic                  in_range;
     logic                  addr_valid;
-    integer                reg_index;
+    localparam int INDEX_W = (REG_COUNT <= 1) ? 1 : $clog2(REG_COUNT);
+    logic [INDEX_W-1:0] reg_index;
     integer                b;
     integer                r;
 
     always_comb begin
         offset     = PADDR - BASE_ADDR;
         aligned    = ((offset & (BYTES_PER_WORD - 1)) == 0);
-        in_range   = (PADDR >= BASE_ADDR) && (offset < (REG_COUNT * BYTES_PER_WORD));
+        in_range   = (offset < (REG_COUNT * BYTES_PER_WORD));
         addr_valid = aligned && in_range;
-        reg_index  = offset / BYTES_PER_WORD;
+        reg_index  = INDEX_W'(offset / BYTES_PER_WORD);
     end
 
     always_comb begin
         // PREADY may be HIGH outside a transfer. It is sampled only in ACCESS.
         if (PSEL && PENABLE) begin
-            PREADY = (wait_count >= WAIT_CYCLES);
+            PREADY = (wait_count == WAIT_CNT_W'(WAIT_CYCLES));
         end else begin
             PREADY = 1'b1;
         end

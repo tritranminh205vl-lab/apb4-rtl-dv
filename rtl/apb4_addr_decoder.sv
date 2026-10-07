@@ -4,7 +4,7 @@ module apb4_addr_decoder #(
     parameter int ADDR_WIDTH = 32,
     parameter int NUM_SLAVES = 4,
     parameter logic [ADDR_WIDTH-1:0] BASE_ADDR = '0,
-    parameter int unsigned SLAVE_WINDOW_BYTES = 4096
+    parameter int SLAVE_WINDOW_BYTES = 4096
 ) (
     input  logic [ADDR_WIDTH-1:0]     PADDR,
     input  logic                      master_select,
@@ -17,6 +17,8 @@ module apb4_addr_decoder #(
 
     always_comb begin
         PSEL = '0;
+        low_addr = '0;
+        high_addr = '0;
 
         if (master_select) begin
             for (i = 0; i < NUM_SLAVES; i = i + 1) begin

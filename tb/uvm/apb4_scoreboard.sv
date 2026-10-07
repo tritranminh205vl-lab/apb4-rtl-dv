@@ -1,13 +1,17 @@
+`uvm_analysis_imp_decl(_bus)
 class apb4_scoreboard extends uvm_component;
     `uvm_component_utils(apb4_scoreboard)
 
     uvm_analysis_imp #(apb4_txn, apb4_scoreboard) imp;
+    uvm_analysis_imp_bus #(apb4_txn, apb4_scoreboard) bus_imp;
+    apb4_txn bus_pending[$];
     bit [31:0] model [0:3][0:3];
     int unsigned checked;
 
     function new(string name, uvm_component parent);
         super.new(name, parent);
         imp = new("imp", this);
+        bus_imp = new("bus_imp", this);
     endfunction
 
     function void build_phase(uvm_phase phase);
@@ -50,10 +54,44 @@ class apb4_scoreboard extends uvm_component;
         return x;
     endfunction
 
+    function void write_bus(apb4_txn t);
+        int s, expected_slave, expected_wait;
+        s = slave_of(t.addr);
+        expected_slave = (s < 0) ? 4 : s;
+        expected_wait = (s < 0) ? 0 : s;
+        if (t.slave != expected_slave)
+            `uvm_error("DECODE", $sformatf("addr=%h selected=%0d expected=%0d", t.addr,t.slave,expected_slave))
+        if (t.wait_cycles != expected_wait)
+            `uvm_error("WAIT", $sformatf("slave=%0d waits=%0d expected=%0d",s,t.wait_cycles,expected_wait))
+        if ($isunknown(t.err) || (!t.write && $isunknown(t.rdata)))
+            `uvm_error("XBUSRSP", "Unknown APB completion response")
+        bus_pending.push_back(t);
+    endfunction
+
     function void write(apb4_txn t);
         int s, r;
         bit expected_err;
         bit [31:0] expected_data;
+        apb4_txn bus_tr;
+
+        if (t.is_reset) begin
+            foreach (model[s,r]) model[s][r] = '0;
+            bus_pending.delete();
+            return;
+        end
+        if ($isunknown(t.err) || (!t.write && $isunknown(t.rdata)))
+            `uvm_error("XRSP", "Unknown upstream response")
+        if (bus_pending.size() == 0) begin
+            `uvm_error("MISSING_BUS", "Upstream response without bus completion")
+        end else begin
+            bus_tr = bus_pending.pop_front();
+            if ({bus_tr.addr,bus_tr.write,bus_tr.prot,bus_tr.strb} !==
+                {t.addr,t.write,t.prot,(t.write ? t.strb : 4'b0000)} ||
+                (t.write && bus_tr.wdata !== t.wdata))
+                `uvm_error("REQ_FORWARD", "Upstream request differs from APB request")
+            if (bus_tr.err !== t.err || (!t.write && bus_tr.rdata !== t.rdata))
+                `uvm_error("RSP_FORWARD", "APB response differs from upstream response")
+        end
 
         checked++;
         s = slave_of(t.addr);
@@ -76,6 +114,12 @@ class apb4_scoreboard extends uvm_component;
                                             t.addr, t.rdata, expected_data))
             end
         end
+    endfunction
+
+    function void check_phase(uvm_phase phase);
+        super.check_phase(phase);
+        if (checked == 0) `uvm_error("NO_CHECKS", "No transactions checked")
+        if (bus_pending.size() != 0) `uvm_error("PENDING_BUS", "Unmatched APB completions")
     endfunction
 
     function void report_phase(uvm_phase phase);

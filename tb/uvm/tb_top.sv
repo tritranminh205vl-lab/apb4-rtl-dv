@@ -1,5 +1,7 @@
 `timescale 1ns/1ps
 
+`include "uvm_macros.svh"
+
 module tb_top;
     import uvm_pkg::*;
     import apb4_uvm_pkg::*;
@@ -34,6 +36,7 @@ module tb_top;
 
     // Passive tap of the internal APB bus for monitor/coverage/assertions.
     assign bus_if.PRESETn = PRESETn;
+    assign bus_if.master_select = dut.master_select;
     assign bus_if.PADDR   = dut.paddr;
     assign bus_if.PSEL    = dut.psel;
     assign bus_if.PENABLE = dut.penable;
@@ -47,6 +50,7 @@ module tb_top;
 
     apb4_protocol_sva u_protocol_sva (
         .PCLK(PCLK), .PRESETn(PRESETn),
+        .master_select(dut.master_select),
         .PADDR(dut.paddr), .PSEL(dut.psel), .PENABLE(dut.penable),
         .PWRITE(dut.pwrite), .PWDATA(dut.pwdata), .PSTRB(dut.pstrb),
         .PPROT(dut.pprot), .PREADY(dut.pready), .PRDATA(dut.prdata),
@@ -58,6 +62,13 @@ module tb_top;
         repeat (5) @(posedge PCLK);
         @(negedge PCLK);
         PRESETn = 1'b1;
+        if ($test$plusargs("RESET_DURING_WAIT")) begin
+            wait (dut.psel[3] && dut.penable && !dut.pready);
+            @(negedge PCLK);
+            PRESETn = 1'b0;
+            repeat (3) @(negedge PCLK);
+            PRESETn = 1'b1;
+        end
     end
 
     initial begin

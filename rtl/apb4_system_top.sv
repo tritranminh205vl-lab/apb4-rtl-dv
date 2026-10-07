@@ -30,9 +30,9 @@ module apb4_system_top #(
     localparam int NUM_SLAVES = 4;
 
     localparam logic [ADDR_WIDTH-1:0] S0_BASE = 32'h0000_0000;
-    localparam logic [ADDR_WIDTH-1:0] S1_BASE = 32'h0000_1000;
-    localparam logic [ADDR_WIDTH-1:0] S2_BASE = 32'h0000_2000;
-    localparam logic [ADDR_WIDTH-1:0] S3_BASE = 32'h0000_3000;
+    localparam logic [ADDR_WIDTH-1:0] S1_BASE = ADDR_WIDTH'(1 * SLAVE_WINDOW_BYTES);
+    localparam logic [ADDR_WIDTH-1:0] S2_BASE = ADDR_WIDTH'(2 * SLAVE_WINDOW_BYTES);
+    localparam logic [ADDR_WIDTH-1:0] S3_BASE = ADDR_WIDTH'(3 * SLAVE_WINDOW_BYTES);
 
     // Shared APB bus. These names are intentionally visible for passive DV.
     logic [ADDR_WIDTH-1:0] paddr;
@@ -118,6 +118,7 @@ module apb4_system_top #(
         .DATA_WIDTH(DATA_WIDTH),
         .NUM_SLAVES(NUM_SLAVES)
     ) u_rsp_mux (
+        .master_select(master_select), .PENABLE(penable),
         .PSEL(psel),
         .PRDATA_S(prdata_s),
         .PREADY_S(pready_s),

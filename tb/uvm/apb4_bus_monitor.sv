@@ -25,6 +25,7 @@ class apb4_bus_monitor extends uvm_component;
             4'b0010: return 1;
             4'b0100: return 2;
             4'b1000: return 3;
+            4'b0000: return 4; // internal decode-miss responder
             default: return 32'hffff_ffff;
         endcase
     endfunction
@@ -39,7 +40,11 @@ class apb4_bus_monitor extends uvm_component;
                 continue;
             end
 
-            if ((vif.mon_cb.PSEL != 0) && !vif.mon_cb.PENABLE) begin
+            if (vif.mon_cb.master_select && !vif.mon_cb.PENABLE) begin
+                if ($isunknown({vif.mon_cb.PADDR,vif.mon_cb.PWRITE,vif.mon_cb.PSTRB,
+                                vif.mon_cb.PPROT,vif.mon_cb.PSEL}) ||
+                    (vif.mon_cb.PWRITE && $isunknown(vif.mon_cb.PWDATA)))
+                    `uvm_error("XBUS", "Unknown APB setup fields")
                 active = apb4_txn::type_id::create("bus_tr");
                 active.addr  = vif.mon_cb.PADDR;
                 active.write = vif.mon_cb.PWRITE;
