@@ -86,6 +86,12 @@ There are two verification levels:
 
 The scoreboard owns a reference model of all 16 registers and performs byte-wise `PSTRB` prediction. The passive APB monitor measures wait states independently of the driver. See `docs/DV_PLAN.md` for the full test plan.
 
+## Recorded QuestaSim result
+
+On **2026-10-16**, an EDA Playground run using **QuestaSim 2025.2** completed the **basic + SVA** regression with **453 checks**, **seed 1**, and **0 tool errors**. The protocol SVA module was loaded with no assertion failures reported. Scenarios included all 16 write-strobe masks, 250 random transfers, and reset during a wait-state transfer.
+
+See the [run report and console excerpts](docs/evidence/questa_sva_2026-10-16.md) for source provenance and limitations. The supplied log reports three compile/optimization warnings whose messages were not included. No coverage percentage is claimed. **UVM normal/reset results are still pending; this result covers the basic testbench with SVA.**
+
 ## Run the basic regression
 
 Requirements: Icarus Verilog with SystemVerilog support.
