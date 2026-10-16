@@ -94,7 +94,15 @@ See the [run report and console excerpts](docs/evidence/questa_sva_2026-10-16.md
 
 A separate **normal UVM 1.2 + SVA** run completed `apb4_regression_test` with **1,167 completed transactions checked**, **100.00% functional covergroup coverage**, and **0 UVM warnings/errors/fatals**. No assertion failures were reported; simulation finished at **75,525 ns**. See the [normal UVM report and console excerpts](docs/evidence/questa_uvm_normal_2026-10-16.md) for the three tool warnings, browser testbench adjustment, and evidence provenance. The coverage value applies only to the defined functional covergroup, not code or assertion coverage.
 
-**The UVM reset-during-wait run (part 3) is still pending.**
+The **UVM reset-during-wait mode (part 3)** also completed with **1,167 transactions checked**, **100.00% functional covergroup coverage**, and **0 UVM warnings/errors/fatals**, at **75,585 ns**. The command explicitly includes `+RESET_DURING_WAIT`; no assertion failures were reported. See the [reset-mode report](docs/evidence/questa_uvm_reset_2026-10-16.md). The supplied log confirms the mode was enabled but does not include a dedicated reset-event marker or waveform.
+
+| Recorded run | Result | Functional covergroup coverage |
+| --- | --- | --- |
+| Basic + SVA | PASS — 453 checks | Not reported |
+| Normal UVM + SVA | PASS — 1,167 completed transactions checked | 100.00% |
+| UVM reset mode + SVA | PASS — 1,167 completed transactions checked | 100.00% |
+
+These are owner-supplied EDA Playground results; they do not establish exhaustive verification or code/assertion coverage closure.
 
 ## Run the basic regression
 
