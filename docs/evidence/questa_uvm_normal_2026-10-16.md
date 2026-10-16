@@ -26,7 +26,7 @@ This report records the complete console log supplied by the project owner after
 
 The prepared browser files were based on commit `549ed2185c679231d2d7f986e918a134843710e6`. RTL was concatenated in file-list order, and the UVM interfaces, package components, SVA checker, and top were bundled into one testbench. After an initial NOCOMP failure, the browser top was instructed to use `run_test("apb4_regression_test")` instead of `run_test()`; this successful log confirms that the named test ran. The actual browser source snapshot, playground URL, and random seed were not supplied, so this result cannot be independently pinned to exact executed source bytes.
 
-This is **part 2: normal UVM + SVA**. The recorded command does not contain `+RESET_DURING_WAIT`. **Part 3, UVM reset during a wait-state transfer, remains pending.** The earlier basic testbench did exercise its own reset scenario; that is separate evidence.
+This is **part 2: normal UVM + SVA**. The recorded command does not contain `+RESET_DURING_WAIT`. Part 3 was recorded subsequently: see the [passing UVM reset-mode report](questa_uvm_reset_2026-10-16.md). The earlier basic testbench did exercise its own reset scenario; that is separate evidence.
 
 ## Testbench scope and coverage meaning
 
