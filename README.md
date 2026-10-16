@@ -90,7 +90,11 @@ The scoreboard owns a reference model of all 16 registers and performs byte-wise
 
 On **2026-10-16**, an EDA Playground run using **QuestaSim 2025.2** completed the **basic + SVA** regression with **453 checks**, **seed 1**, and **0 tool errors**. The protocol SVA module was loaded with no assertion failures reported. Scenarios included all 16 write-strobe masks, 250 random transfers, and reset during a wait-state transfer.
 
-See the [run report and console excerpts](docs/evidence/questa_sva_2026-10-16.md) for source provenance and limitations. The supplied log reports three compile/optimization warnings whose messages were not included. No coverage percentage is claimed. **UVM normal/reset results are still pending; this result covers the basic testbench with SVA.**
+See the [run report and console excerpts](docs/evidence/questa_sva_2026-10-16.md) for source provenance and limitations. The supplied log reports three compile/optimization warnings whose messages were not included. No coverage percentage is claimed. This result covers the basic testbench with SVA.
+
+A separate **normal UVM 1.2 + SVA** run completed `apb4_regression_test` with **1,167 completed transactions checked**, **100.00% functional covergroup coverage**, and **0 UVM warnings/errors/fatals**. No assertion failures were reported; simulation finished at **75,525 ns**. See the [normal UVM report and console excerpts](docs/evidence/questa_uvm_normal_2026-10-16.md) for the three tool warnings, browser testbench adjustment, and evidence provenance. The coverage value applies only to the defined functional covergroup, not code or assertion coverage.
+
+**The UVM reset-during-wait run (part 3) is still pending.**
 
 ## Run the basic regression
 
